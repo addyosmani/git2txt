@@ -9,15 +9,11 @@ import { promisify } from 'util';
 // Import the functions and CLI to test
 import {
     validateInput,
-    processFiles,
     writeOutput,
     cleanup,
     main,
     cli
 } from '../index.js';
-
-const execFileAsync = promisify(execFile);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Helper function to create test file and verify its existence
 async function createTestFile(filepath, content) {
@@ -105,60 +101,6 @@ test('cleanup removes temporary directory', async t => {
         { code: 'ENOENT' }
     );
 });
-
-// test('processFiles processes repository files', async t => {
-//     const testDir = t.context.tempDir;
-//     const testContent = 'Hello, world!';
-//     const testFile = path.join(testDir, 'test.txt');
-
-//     try {
-//         // Create and verify test file
-//         await fs.writeFile(testFile, testContent);
-        
-//         // Wait briefly to ensure file is written
-//         await new Promise(resolve => setTimeout(resolve, 100));
-        
-//         // Verify file exists and has correct content
-//         const fileStats = await fs.stat(testFile);
-//         t.true(fileStats.isFile(), 'Test file should exist and be a file');
-        
-//         const actualContent = await fs.readFile(testFile, 'utf8');
-//         t.is(actualContent, testContent, 'File should contain correct content');
-
-//         // Process files
-//         const output = await processFiles(testDir, {
-//             threshold: 1,
-//             includeAll: true
-//         });
-
-//         // Log output for debugging
-//         if (process.env.DEBUG) {
-//             console.log('Test state:', {
-//                 testDir,
-//                 testFile,
-//                 fileExists: await fs.access(testFile).then(() => true).catch(() => false),
-//                 dirContents: await fs.readdir(testDir),
-//                 fileContent: actualContent,
-//                 processOutput: output
-//             });
-//         }
-
-//         // Verify process output
-//         t.regex(output, /File: test\.txt/, 'Output should contain file name');
-//         t.regex(output, /Hello, world!/, 'Output should contain file content');
-
-//     } catch (error) {
-//         console.error('Test error:', {
-//             message: error.message,
-//             stack: error.stack,
-//             testDir,
-//             exists: await fs.access(testDir).then(() => true).catch(() => false),
-//             dirContents: await fs.readdir(testDir).catch(e => e.message),
-//             fileExists: await fs.access(testFile).then(() => true).catch(() => false)
-//         });
-//         throw error;
-//     }
-// });
 
 test('main function handles missing URL', async t => {
     // Ensure test environment

@@ -2,28 +2,26 @@
 
 /**
  * git2txt - A command-line tool to convert GitHub repositories into readable text files
- * 
+ *
  * This tool clones a GitHub repository, processes its text files, and combines them
  * into a single output file. It's useful for code review, analysis, and documentation
  * purposes.
- * 
+ *
  * Features:
  * - Supports public GitHub repositories
  * - Filters binary and large files
  * - Customizable file size threshold
  * - Debug mode for troubleshooting
  * - Progress indicators for long operations
- * 
+ *
  * @module git2txt
  */
 
 import meow from 'meow';
 import ora from 'ora';
 import chalk from 'chalk';
-import { glob } from 'glob';
 import fs from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { filesize as formatFileSize } from 'filesize';
 import { isBinaryFile } from 'isbinaryfile';
 import os from 'os';
@@ -58,9 +56,8 @@ const helpText = `
 const exit = (code) => {
     if (process.env.NODE_ENV === 'test') {
         throw new Error(`Exit called with code: ${code}`);
-    } else {
-        process.exit(code);
     }
+    process.exit(code);
 };
 
 // Initialize CLI parser with meow
@@ -97,22 +94,22 @@ function normalizeGitHubUrl(url) {
     try {
         // Remove trailing slashes
         url = url.replace(/\/+$/, '');
-        
+
         // Handle git@ URLs
         if (url.startsWith('git@github.com:')) {
             return url;
         }
-        
+
         // Handle full HTTPS URLs
         if (url.startsWith('https://github.com/')) {
             return url;
         }
-        
+
         // Handle short format (user/repo)
         if (url.match(/^[\w-]+\/[\w-]+$/)) {
             return `https://github.com/${url}`;
         }
-        
+
         throw new Error('Invalid GitHub repository URL format');
     } catch (error) {
         throw new Error(`Invalid GitHub URL: ${url}`);
@@ -152,7 +149,7 @@ export async function downloadRepository(url) {
         // Normalize the GitHub URL
         const normalizedUrl = normalizeGitHubUrl(url);
         const repoName = url.split('/').pop().replace('.git', '');
-        
+
         if (cli.flags.debug) {
             console.log(chalk.blue('Debug: Normalized URL:'), normalizedUrl);
             console.log(chalk.blue('Debug: Temp directory:'), tempDir);
@@ -163,7 +160,7 @@ export async function downloadRepository(url) {
 
         // Clone the repository
         const cloneCommand = `git clone --depth 1 ${normalizedUrl} ${tempDir}`;
-        
+
         if (cli.flags.debug) {
             console.log(chalk.blue('Debug: Executing command:'), cloneCommand);
         }
@@ -171,7 +168,7 @@ export async function downloadRepository(url) {
         await execAsync(cloneCommand, {
             maxBuffer: 1024 * 1024 * 100 // 100MB buffer
         });
-        
+
         // Verify the download
         const files = await fs.readdir(tempDir);
         if (files.length === 0) {
@@ -182,11 +179,11 @@ export async function downloadRepository(url) {
         return { tempDir, repoName };
     } catch (error) {
         if (spinner) spinner.fail('Failed to download repository');
-        
+
         if (cli.flags.debug) {
             console.log(chalk.blue('Debug: Full error:'), error);
         }
-        
+
         if (process.env.NODE_ENV !== 'test') {
             console.error(chalk.red('Error: Could not access the repository. Please check:'));
             console.error(chalk.yellow('  1. The repository exists and is public'));
@@ -194,7 +191,7 @@ export async function downloadRepository(url) {
             console.error(chalk.yellow('  3. GitHub is accessible from your network'));
             console.error(chalk.yellow('  4. Git is installed and accessible from command line'));
         }
-        
+
         await cleanup(tempDir);
         throw error;
     }
@@ -222,10 +219,10 @@ export async function processFiles(directory, options) {
      */
     async function processDirectory(dir) {
         const entries = await fs.readdir(dir, { withFileTypes: true });
-        
+
         for (const entry of entries) {
             const fullPath = path.join(dir, entry.name);
-            
+
             if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== '.git') {
                 // Recursively process subdirectories
                 await processDirectory(fullPath);
@@ -255,13 +252,13 @@ export async function processFiles(directory, options) {
 
                 const content = await fs.readFile(fullPath, 'utf8');
                 const relativePath = path.relative(directory, fullPath);
-                
+
                 output += `\n${'='.repeat(80)}\n`;
                 output += `File: ${relativePath}\n`;
                 output += `Size: ${formatFileSize(stats.size)}\n`;
                 output += `${'='.repeat(80)}\n\n`;
                 output += `${content}\n`;
-                
+
                 processedFiles++;
 
                 if (process.env.DEBUG) {
@@ -343,22 +340,23 @@ export async function main() {
     let tempDir;
     try {
         const url = await validateInput(cli.input);
-        if (process.env.NODE_ENV !== 'test') {
-            const result = await downloadRepository(url);
-            tempDir = result.tempDir;
-            
-            const outputPath = cli.flags.output || `${result.repoName}.txt`;
-            const content = await processFiles(tempDir, {
-                threshold: cli.flags.threshold,
-                includeAll: cli.flags.includeAll
-            });
-
-            if (!content) {
-                throw new Error('No content was generated from the repository');
-            }
-
-            await writeOutput(content, outputPath);
+        if (process.env.NODE_ENV === 'test') {
+            return;
         }
+
+        const result = await downloadRepository(url);
+        tempDir = result.tempDir;
+        const outputPath = cli.flags.output || `${result.repoName}.txt`;
+        const content = await processFiles(tempDir, {
+            threshold: cli.flags.threshold,
+            includeAll: cli.flags.includeAll
+        });
+
+        if (!content) {
+            throw new Error('No content was generated from the repository');
+        }
+
+        await writeOutput(content, outputPath);
     } catch (error) {
         if (process.env.NODE_ENV === 'test') {
             throw error;
