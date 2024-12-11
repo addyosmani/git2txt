@@ -1,6 +1,6 @@
 import test from 'ava';
 import path from 'path';
-import fs from 'fs/promises';
+import { promises as fsp } from 'node:fs'; // Corrected import for fs.promises
 import os from 'os';
 import { fileURLToPath } from 'url';
 import { execFile } from 'child_process';
@@ -13,7 +13,8 @@ import {
     writeOutput,
     cleanup,
     main,
-    cli
+    cli,
+    processDirectory
 } from '../index.js';
 
 const execFileAsync = promisify(execFile);
@@ -21,13 +22,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Helper function to create test file and verify its existence
 async function createTestFile(filepath, content) {
-    await fs.mkdir(path.dirname(filepath), { recursive: true });
-    await fs.writeFile(filepath, content);
-    const exists = await fs.access(filepath).then(() => true).catch(() => false);
-    if (!exists) {
-        throw new Error(`Failed to create test file: ${filepath}`);
+    try {
+        await fsp.mkdir(path.dirname(filepath), { recursive: true });
+        await fsp.writeFile(filepath, content);
+        return true;
+    } catch (error) {
+        console.error(`Error creating test file ${filepath}:`, error);
+        return false;
     }
-    return exists;
 }
 
 // Setup test environment
@@ -42,12 +44,12 @@ test.beforeEach(async t => {
     
     // Create temp directory
     const tempDir = path.join(os.tmpdir(), `git2txt-test-${Date.now()}`);
-    await fs.mkdir(tempDir, { recursive: true });
+    await fsp.mkdir(tempDir, { recursive: true });
     t.context.tempDir = tempDir;
 });
 
 // Cleanup after each test
-test.afterEach(async t => {
+test.afterEach.always(async t => {
     // Restore original state
     process.argv = t.context.originalArgv;
     cli.input = t.context.originalInput;
@@ -55,122 +57,96 @@ test.afterEach(async t => {
     
     // Clean up temp directory
     if (t.context.tempDir) {
-        await fs.rm(t.context.tempDir, { recursive: true, force: true }).catch(() => {});
+        await fsp.rm(t.context.tempDir, { recursive: true, force: true }).catch(() => {});
     }
 });
 
-test('validateInput throws error on empty input', async t => {
+test.serial('validateInput throws error on empty input', async t => {
     await t.throwsAsync(
         async () => validateInput([]),
         {
-            message: 'Repository URL is required'
+            message: 'Repository URL is required.'
         }
     );
 });
 
-test('validateInput throws error on non-GitHub URL', async t => {
+test.serial('validateInput throws error on non-GitHub URL', async t => {
     await t.throwsAsync(
         async () => validateInput(['https://gitlab.com/user/repo']),
         {
-            message: 'Only GitHub repositories are supported'
+            message: 'Only GitHub repositories are supported.'
         }
     );
 });
 
-test('validateInput accepts valid GitHub URL', async t => {
+test.serial('validateInput accepts valid GitHub URL', async t => {
     const url = 'https://github.com/octocat/Spoon-Knife';
     const result = await validateInput([url]);
     t.is(result, url);
 });
 
-test('writeOutput writes content to file', async t => {
+test.serial('writeOutput writes content to file', async t => {
     const outputPath = path.join(t.context.tempDir, 'output.txt');
     const content = 'Test content';
     
     await writeOutput(content, outputPath);
     
-    const fileContent = await fs.readFile(outputPath, 'utf8');
+    const fileContent = await fsp.readFile(outputPath, 'utf8');
     t.is(fileContent, content);
 });
 
-test('cleanup removes temporary directory', async t => {
+test.serial('cleanup removes temporary directory', async t => {
     const tempDir = path.join(t.context.tempDir, 'cleanup-test');
-    await fs.mkdir(tempDir, { recursive: true });
-    await fs.writeFile(path.join(tempDir, 'test.txt'), 'test');
+    await fsp.mkdir(tempDir, { recursive: true });
+    await fsp.writeFile(path.join(tempDir, 'test.txt'), 'test');
     
     await cleanup(tempDir);
     
     await t.throwsAsync(
-        () => fs.access(tempDir),
+        () => fsp.access(tempDir),
         { code: 'ENOENT' }
     );
 });
 
-// test('processFiles processes repository files', async t => {
-//     const testDir = t.context.tempDir;
-//     const testContent = 'Hello, world!';
-//     const testFile = path.join(testDir, 'test.txt');
+test.serial('processFiles processes repository files', async t => {
+    const testDir = t.context.tempDir;
+    const testContent = 'Hello, world!';
+    const testFile = path.join(testDir, 'test.txt');
+    const expectedRelativeFilePath = path.relative(testDir, testFile); // Generate expected path
 
-//     try {
-//         // Create and verify test file
-//         await fs.writeFile(testFile, testContent);
-        
-//         // Wait briefly to ensure file is written
-//         await new Promise(resolve => setTimeout(resolve, 100));
-        
-//         // Verify file exists and has correct content
-//         const fileStats = await fs.stat(testFile);
-//         t.true(fileStats.isFile(), 'Test file should exist and be a file');
-        
-//         const actualContent = await fs.readFile(testFile, 'utf8');
-//         t.is(actualContent, testContent, 'File should contain correct content');
+    // Set the TEMP_DIR environment variable for the processFiles test
+    process.env.TEMP_DIR = testDir;
 
-//         // Process files
-//         const output = await processFiles(testDir, {
-//             threshold: 1,
-//             includeAll: true
-//         });
+    const fileCreated = await createTestFile(testFile, testContent);
+    if (!fileCreated) {
+        t.fail('Failed to create test file');
+        return;
+    }
 
-//         // Log output for debugging
-//         if (process.env.DEBUG) {
-//             console.log('Test state:', {
-//                 testDir,
-//                 testFile,
-//                 fileExists: await fs.access(testFile).then(() => true).catch(() => false),
-//                 dirContents: await fs.readdir(testDir),
-//                 fileContent: actualContent,
-//                 processOutput: output
-//             });
-//         }
+    try {
+        const output = await processDirectory(testDir, { threshold: 1, includeAll: true });
+        console.log('processFiles output:', output.content);
+        if (output.content) { // Check if output.content is not empty
+            const expectedRegex = new RegExp(`File:\\s*${expectedRelativeFilePath}`); // Use generated path
+            t.regex(output.content, expectedRegex); // Corrected syntax
+            t.regex(output.content, /Hello, world!/);
+        } else {
+            t.fail('processFiles returned empty output');
+        }
+    } catch (error) {
+        console.error("Error in processFiles test:", error);
+        t.fail(`processFiles test failed unexpectedly: ${error.message}`);
+    }
+});
 
-//         // Verify process output
-//         t.regex(output, /File: test\.txt/, 'Output should contain file name');
-//         t.regex(output, /Hello, world!/, 'Output should contain file content');
-
-//     } catch (error) {
-//         console.error('Test error:', {
-//             message: error.message,
-//             stack: error.stack,
-//             testDir,
-//             exists: await fs.access(testDir).then(() => true).catch(() => false),
-//             dirContents: await fs.readdir(testDir).catch(e => e.message),
-//             fileExists: await fs.access(testFile).then(() => true).catch(() => false)
-//         });
-//         throw error;
-//     }
-// });
-
-test('main function handles missing URL', async t => {
-    // Ensure test environment
+test.serial('main function handles missing URL', async t => {
     process.env.NODE_ENV = 'test';
-    // Clear CLI input
     cli.input = [];
     
-    // Test that main throws correct error
     await t.throwsAsync(
         async () => main(),
         {
-            message: 'Repository URL is required'
+            message: 'Repository URL is required.'
         }
     );
 });
