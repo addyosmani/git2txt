@@ -32,22 +32,24 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
-// CLI help text with usage instructions and examples
+// Обновленный текст помощи с информацией о локальных репозиториях
 const helpText = `
   ${chalk.bold('Usage')}
-    $ git2txt <repository-url>
+    $ git2txt <repository-url-or-path>
 
   ${chalk.bold('Options')}
     --output, -o     Specify output file path
     --threshold, -t  Set file size threshold in MB (default: 0.5)
     --include-all    Include all files regardless of size or type
+    --local         Process local repository path
     --debug         Enable debug mode with verbose logging
     --help          Show help
     --version       Show version
 
   ${chalk.bold('Examples')}
     $ git2txt https://github.com/username/repository
-    $ git2txt https://github.com/username/repository --output=output.txt
+    $ git2txt /path/to/local/repo --local
+    $ git2txt ./my-repo --local --output=output.txt
 `;
 
 /**
@@ -77,6 +79,10 @@ export const cli = meow(helpText, {
             default: 0.1
         },
         includeAll: {
+            type: 'boolean',
+            default: false
+        },
+        local: {
             type: 'boolean',
             default: false
         },
@@ -120,22 +126,48 @@ function normalizeGitHubUrl(url) {
 }
 
 /**
- * Validates the command line input
- * @param {string[]} input - Command line arguments
- * @returns {Promise<string>} Validated repository URL
- * @throws {Error} If input is missing or invalid
+ * Проверяет существование локального репозитория
+ * @param {string} path - Путь к локальному репозиторию
+ * @returns {Promise<boolean>} Существует ли репозиторий
  */
-export async function validateInput(input) {
+async function validateLocalRepo(repoPath) {
+    try {
+        const stats = await fs.stat(repoPath);
+        const gitPath = path.join(repoPath, '.git');
+        const gitStats = await fs.stat(gitPath);
+        
+        return stats.isDirectory() && gitStats.isDirectory();
+    } catch (error) {
+        return false;
+    }
+}
+
+/**
+ * Валидирует входные данные с учетом локальных репозиториев
+ * @param {string[]} input - Аргументы командной строки
+ * @param {Object} flags - Флаги CLI
+ * @returns {Promise<Object>} Объект с валидированными данными
+ */
+export async function validateInput(input, flags) {
     if (!input || input.length === 0) {
-        throw new Error('Repository URL is required');
+        throw new Error('Repository URL or path is required');
     }
 
-    const url = input[0];
-    if (!url.includes('github.com') && !url.match(/^[\w-]+\/[\w-]+$/)) {
-        throw new Error('Only GitHub repositories are supported');
+    const source = input[0];
+    
+    if (flags.local) {
+        const isValidRepo = await validateLocalRepo(source);
+        if (!isValidRepo) {
+            throw new Error('Invalid local repository path. Make sure it\'s a Git repository.');
+        }
+        return { type: 'local', path: source };
+    }
+    
+    if (!source.includes('github.com') && !source.match(/^[\w-]+\/[\w-]+$/)) {
+        throw new Error('Only GitHub repositories or local paths (with --local flag) are supported');
     }
 
-    return url;
+    return { type: 'remote', url: source };
 }
 
 /**
@@ -340,37 +372,40 @@ export async function cleanup(directory) {
  * @returns {Promise<void>}
  */
 export async function main() {
-    let tempDir;
     try {
-        const url = await validateInput(cli.input);
-        if (process.env.NODE_ENV !== 'test') {
-            const result = await downloadRepository(url);
-            tempDir = result.tempDir;
-            
-            const outputPath = cli.flags.output || `${result.repoName}.txt`;
-            const content = await processFiles(tempDir, {
-                threshold: cli.flags.threshold,
-                includeAll: cli.flags.includeAll
-            });
+        const result = await validateInput(cli.input, cli.flags);
+        let targetDir;
+        let repoName;
 
-            if (!content) {
-                throw new Error('No content was generated from the repository');
-            }
+        if (result.type === 'local') {
+            targetDir = result.path;
+            repoName = path.basename(result.path);
+        } else {
+            const downloadResult = await downloadRepository(result.url);
+            targetDir = downloadResult.tempDir;
+            repoName = downloadResult.repoName;
+        }
 
-            await writeOutput(content, outputPath);
+        const outputPath = cli.flags.output || `${repoName}.txt`;
+        const content = await processFiles(targetDir, {
+            threshold: cli.flags.threshold,
+            includeAll: cli.flags.includeAll
+        });
+
+        if (!content) {
+            throw new Error('No content was generated from the repository');
+        }
+
+        await writeOutput(content, outputPath);
+
+        // Очищаем временные файлы только для удаленных репозиториев
+        if (result.type === 'remote') {
+            await cleanup(targetDir);
         }
     } catch (error) {
-        if (process.env.NODE_ENV === 'test') {
-            throw error;
-        } else {
-            console.error(chalk.red('\nAn unexpected error occurred:'));
-            console.error(error.message || error);
-            exit(1);
-        }
-    } finally {
-        if (tempDir) {
-            await cleanup(tempDir);
-        }
+        console.error(chalk.red('\nAn error occurred:'));
+        console.error(error.message || error);
+        process.exit(1);
     }
 }
 
