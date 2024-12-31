@@ -7,6 +7,7 @@ Convert GitHub repositories to text files with ease. This CLI tool downloads a r
 ## Features
 
 - 📥 Download any public GitHub repository
+- 🔒 Process local Git repositories (including private ones)
 - 📝 Convert repository contents to a single text file
 - ⚡ Automatic binary file exclusion
 - 🔧 Configurable file size threshold
@@ -31,6 +32,9 @@ git2txt username/repository
 
 # SSH format
 git2txt git@github.com:username/repository
+
+# Local repository path (requires --local flag)
+git2txt /path/to/local/repo --local
 ```
 
 ### URL Format Support
@@ -42,6 +46,7 @@ The tool accepts these GitHub repository URL formats:
 - SSH URLs: `git@github.com:username/repository`
 - URLs with or without `.git` suffix
 - URLs with or without trailing slashes
+- Local paths with `--local` flag: `/path/to/repo` or `./relative/path`
 
 ### Options
 
@@ -49,6 +54,7 @@ The tool accepts these GitHub repository URL formats:
 --output, -o     Specify output file path (default: repo-name.txt)
 --threshold, -t  Set file size threshold in MB (default: 0.1)
 --include-all    Include all files regardless of size or type
+--local         Process local repository path
 --debug         Enable debug mode with verbose logging
 --help          Show help
 --version       Show version
@@ -78,6 +84,15 @@ git2txt username/repository --include-all
 
 # Enable debug output
 git2txt username/repository --debug
+
+# Using local repository path
+git2txt /path/to/local/repo --local
+
+# Local repository with custom output
+git2txt ./my-repo --local --output=output.txt
+
+# Local repository with custom threshold
+git2txt ./my-repo --local --threshold=2
 ```
 
 ## Default Behavior
